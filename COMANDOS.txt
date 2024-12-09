@@ -1,0 +1,2 @@
+C:\Users\Lucasbe\Escritorio\pecl3_bbdd\labBD_pl3\usuarios.sql
+DROP USER admin;
