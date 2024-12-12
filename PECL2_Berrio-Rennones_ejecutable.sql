@@ -21,14 +21,16 @@ CREATE TABLE IF NOT EXISTS discos.Usuario (
 CREATE TABLE IF NOT EXISTS discos.canciones (
     id_cancion TEXT,
     titulo TEXT,
-    duracion TEXT
+    duracion TEXT,
+    id_disco TEXT
 );
 
 CREATE TABLE IF NOT EXISTS discos.ediciones (
     id_edicion TEXT,
     anioo TEXT,
     pais TEXT,
-    formato TEXT
+    formato TEXT,
+    id_disco TEXT
 );
 
 CREATE TABLE IF NOT EXISTS discos.discos (
@@ -92,82 +94,45 @@ CREATE TABLE IF NOT EXISTS discosfinal.Grupofinal (
 -- Insertar los datos en Grupofinal
 INSERT INTO discosfinal.Grupofinal (Nombre, URL)
 SELECT DISTINCT LOWER(nombre_grupo), url_grupo
-FROM discos.discos
-ON CONFLICT (Nombre) DO NOTHING;
+FROM discos.discos;
 
 -- Crear la tabla Discofinal y luego insertar los datos
 CREATE TABLE IF NOT EXISTS discosfinal.Discofinal (
-    Titulo TEXT NOT NULL,
-    Año_publicacion TEXT NOT NULL,
-    URL_Portada TEXT,
-    nombre_grupo TEXT,
-    PRIMARY KEY (Titulo, Año_publicacion, nombre_grupo),
-    UNIQUE (Titulo, Año_publicacion),  -- Agregar restricción UNIQUE
-    FOREIGN KEY (nombre_grupo) REFERENCES discosfinal.Grupofinal (Nombre) ON DELETE SET NULL
+    Titulo TEXT,
+    Año_publicacion TEXT,
+    PRIMARY KEY (Titulo, Año_publicacion)
 );
 
 -- Insertar los datos en Discofinal
-INSERT INTO discosfinal.Discofinal (Titulo, Año_publicacion, URL_Portada, nombre_grupo)
-SELECT DISTINCT nombre_disco, anio, formato, LOWER(nombre_grupo)
-FROM discos.discos
-WHERE EXISTS (
-    SELECT 1
-    FROM discosfinal.Grupofinal gf
-    WHERE gf.Nombre = LOWER(discos.discos.nombre_grupo)
-)
-ON CONFLICT (Titulo, Año_publicacion, nombre_grupo) DO NOTHING;
+INSERT INTO discosfinal.Discofinal (Titulo, Año_publicacion)
+SELECT DISTINCT nombre_disco, anio
+FROM discos.discos;
 
-
--- Crear la tabla generosdiscofinal y luego insertar los datos
-CREATE TABLE IF NOT EXISTS discosfinal.generosdiscofinal (
-    genero TEXT,
-    titulo_disco TEXT,
-    año_publicacion TEXT,
-    PRIMARY KEY (genero, titulo_disco, año_publicacion),
-    FOREIGN KEY (titulo_disco, año_publicacion) 
-        REFERENCES discosfinal.Discofinal (Titulo, Año_publicacion) ON DELETE CASCADE
-);
-
--- Insertar los datos en generosdiscofinal
-INSERT INTO discosfinal.generosdiscofinal (genero, titulo_disco, año_publicacion)
-SELECT UNNEST(STRING_TO_ARRAY(d.generos, ',')) AS genero, d.nombre_disco, d.anio
-FROM discos.discos d
-JOIN discosfinal.Discofinal df 
-    ON df.titulo = d.nombre_disco 
-    AND df.año_publicacion = d.anio
-ON CONFLICT (genero, titulo_disco, año_publicacion) DO NOTHING;
-
--- Crear la tabla Cancionesfinal con clave primaria que incluye Duración
+-- Crear la tabla Cancionesfinal y luego insertar los datos
 CREATE TABLE IF NOT EXISTS discosfinal.Cancionesfinal (
     titulo_disco TEXT,
     Año_publicacion_disco TEXT,
     Título TEXT,
-    Duración TEXT,
-    PRIMARY KEY (titulo_disco, Año_publicacion_disco, Título, Duración), -- Incluye duración en la clave primaria
+    Duración TEXT NOT NULL,
+    PRIMARY KEY (titulo_disco, Año_publicacion_disco, Título),
     FOREIGN KEY (titulo_disco, Año_publicacion_disco) 
         REFERENCES discosfinal.Discofinal (Titulo, Año_publicacion) ON DELETE CASCADE
 );
 
--- Insertar solo canciones que no existan previamente en Cancionesfinal
+-- Insertar solo canciones que no existan previamente en Cancionesfinal y donde Duración no sea nulo
 INSERT INTO discosfinal.Cancionesfinal (titulo_disco, Año_publicacion_disco, Título, Duración)
-SELECT DISTINCT ON (d.nombre_disco, d.anio, c.titulo) 
-    d.nombre_disco, d.anio, c.titulo, c.duracion
+SELECT d.nombre_disco, d.anio, c.titulo, c.duracion
 FROM discos.canciones c
 JOIN discos.discos d 
-    ON d.id = c.id_cancion -- O usa la relación adecuada entre discos y canciones
+    ON d.id = c.id_disco -- Asegúrate de que esta relación sea correcta
 WHERE EXISTS (
     SELECT 1
     FROM discosfinal.Discofinal df
     WHERE df.Titulo = d.nombre_disco 
       AND df.Año_publicacion = d.anio
 )
-AND NOT EXISTS (
-    SELECT 1
-    FROM discosfinal.Cancionesfinal cf
-    WHERE cf.titulo_disco = d.nombre_disco
-      AND cf.Año_publicacion_disco = d.anio
-      AND cf.Título = c.titulo
-);
+AND c.duracion IS NOT NULL
+ON CONFLICT (titulo_disco, Año_publicacion_disco, Título) DO NOTHING;
 
 -- Crear la tabla Edicionesfinal, sin necesidad de una restricción de unicidad adicional
 CREATE TABLE IF NOT EXISTS discosfinal.Edicionesfinal (
@@ -185,14 +150,14 @@ CREATE TABLE IF NOT EXISTS discosfinal.Edicionesfinal (
 INSERT INTO discosfinal.Edicionesfinal (año_disco, titulo_disco, Formato, Año_Edición, País)
 SELECT d.anio, d.nombre_disco, e.formato, e.anioo, e.pais
 FROM discos.ediciones e
-JOIN discos.discos d ON d.id = e.id_edicion
+JOIN discos.discos d ON d.id = e.id_disco -- Asegúrate de que esta relación sea correcta
 WHERE EXISTS (
     SELECT 1
     FROM discosfinal.Discofinal df
     WHERE df.Titulo = d.nombre_disco AND df.Año_publicacion = d.anio
 )
 -- Evitar duplicados por la clave primaria completa
-ON CONFLICT (Formato, Año_Edición, País) DO NOTHING;
+ON CONFLICT (año_disco, titulo_disco, Formato, Año_Edición, País) DO NOTHING;
 
 -- Crear la tabla UdeseaDfinal y luego insertar los datos
 CREATE TABLE IF NOT EXISTS discosfinal.UdeseaDfinal (
@@ -210,52 +175,39 @@ CREATE TABLE IF NOT EXISTS discosfinal.UdeseaDfinal (
 INSERT INTO discosfinal.UdeseaDfinal (Nombre_Usuario, titulo_disco, año_disco)
 SELECT u.nombre_usuario, d.nombre_disco, d.anio
 FROM discos.Usuario_desea_disco u
-JOIN discos.discos d ON d.nombre_disco = u.nombre_disco AND d.anio = u.anio_lanzamiento
-WHERE EXISTS (
-    SELECT 1 FROM discosfinal.Usuariofinal uf WHERE uf.Nombre_Usuario = u.nombre_usuario
-)
-ON CONFLICT (Nombre_Usuario, titulo_disco, año_disco) DO NOTHING;
-
--- Delete duplicate rows in Edicionesfinal based on país, año_edicion, and Formato
-DELETE FROM discosfinal.Edicionesfinal
-WHERE ctid NOT IN (
-    SELECT MIN(ctid)
-    FROM discosfinal.Edicionesfinal
-    GROUP BY País, Año_Edición, Formato
-);
-
--- Add a unique constraint on pais, año_edicion, and Formato in Edicionesfinal
-ALTER TABLE discosfinal.Edicionesfinal DROP CONSTRAINT IF EXISTS unique_pais_anio_edicion_formato_n;
-ALTER TABLE discosfinal.Edicionesfinal ADD CONSTRAINT unique_pais_anio_edicion_formato_n UNIQUE (País, Año_Edición, Formato);
-
--- Crear la tabla UtieneEfinal y luego insertar los datos
-CREATE TABLE IF NOT EXISTS discosfinal.UtieneEfinal (
-    Nombre_Usuario TEXT,
-    pais TEXT,
-    año_edicion TEXT,
-    Formato TEXT,
-    estado TEXT,
-    PRIMARY KEY (Nombre_Usuario, pais, año_edicion, Formato),
-    FOREIGN KEY (Nombre_Usuario) 
-        REFERENCES discosfinal.Usuariofinal (Nombre_Usuario) ON DELETE CASCADE,
-    FOREIGN KEY (pais, año_edicion, Formato) 
-        REFERENCES discosfinal.Edicionesfinal (País, Año_Edición, Formato) ON DELETE CASCADE
-);
-
--- Insertar los datos en UtieneEfinal
-INSERT INTO discosfinal.UtieneEfinal (Nombre_Usuario, pais, año_edicion, Formato, estado)
-SELECT ute.nombre_usuario, ef.País, ef.Año_Edición, ef.Formato, ute.estado
-FROM discos.Usuario_tiene_edicion ute
-JOIN discosfinal.Edicionesfinal ef ON ef.titulo_disco = ute.nombre_disco
-AND ef.año_disco = ute.anio_lanzamiento
-AND ef.Año_Edición = ute.anio_edicion
-AND ef.País = ute.pais_edicion
+JOIN discos.discos d ON u.id_disco = d.id -- Asegúrate de que esta relación sea correcta
 WHERE EXISTS (
     SELECT 1
     FROM discosfinal.Usuariofinal uf
-    WHERE uf.Nombre_Usuario = ute.nombre_usuario
-)
-ON CONFLICT (Nombre_Usuario, pais, año_edicion, Formato) DO NOTHING;
+    WHERE uf.Nombre_Usuario = u.nombre_usuario
+);
+
+-- Crear la tabla Usuario_tiene_edicionfinal y luego insertar los datos
+CREATE TABLE IF NOT EXISTS discosfinal.Usuario_tiene_edicionfinal (
+    Nombre_Usuario TEXT,
+    titulo_disco TEXT,
+    año_disco TEXT,
+    Formato TEXT,
+    Año_Edición TEXT,
+    País TEXT,
+    PRIMARY KEY (Nombre_Usuario, titulo_disco, año_disco, Formato, Año_Edición, País),
+    FOREIGN KEY (Nombre_Usuario) 
+        REFERENCES discosfinal.Usuariofinal (Nombre_Usuario) ON DELETE CASCADE,
+    FOREIGN KEY (titulo_disco, año_disco, Formato, Año_Edición, País) 
+        REFERENCES discosfinal.Edicionesfinal (año_disco, titulo_disco, Formato, Año_Edición, País) ON DELETE CASCADE
+);
+
+-- Insertando solo si el nombre_usuario existe en la tabla Usuariofinal
+INSERT INTO discosfinal.Usuario_tiene_edicionfinal (Nombre_Usuario, titulo_disco, año_disco, Formato, Año_Edición, País)
+SELECT u.nombre_usuario, d.nombre_disco, d.anio, e.formato, e.anioo, e.pais
+FROM discos.Usuario_tiene_edicion u
+JOIN discos.discos d ON u.id_disco = d.id -- Asegúrate de que esta relación sea correcta
+JOIN discos.ediciones e ON u.id_edicion = e.id_edicion
+WHERE EXISTS (
+    SELECT 1
+    FROM discosfinal.Usuariofinal uf
+    WHERE uf.Nombre_Usuario = u.nombre_usuario
+);
 
 /*
 
@@ -348,7 +300,7 @@ SELECT df.Titulo, df.Año_publicacion,
            CAST(SPLIT_PART(c.Duración, ':', 2) AS INTEGER)
        ) AS duracion_total_segundos
 FROM discosfinal.Cancionesfinal AS c
-JOIN discosfinal.Discofinal AS df ON c.titulo_disco = df.Titulo
+JOIN discosfinal.Discofinal df ON c.titulo_disco = df.Titulo
     AND c.Año_publicacion_disco = df.Año_publicacion
 WHERE CAST(df.Año_publicacion AS INTEGER) < 2000
   AND c.Duración IS NOT NULL 
@@ -422,36 +374,3 @@ GROUP BY ut.Nombre_Usuario
 ORDER BY numero_ediciones DESC
 LIMIT 1;
 */
-
---CREATE TABLE auditoria (
---  accion text,
---  fecha timestamp	 
---);
-
--- Se crea la función que se ejecutará 
-
-CREATE OR REPLACE FUNCTION fn_auditoria() RETURNS TRIGGER AS $fn_auditoria
-  BEGIN
-  -- Se determina que acción a activado el trigger e inserta un nuevo valor en la tabla dependiendo
-  -- del dicha acción
-  -- Junto con la acción se escribe fecha y hora en la que se ha producido la acción
-   IF TG_OP='INSERT' THEN
-     INSERT INTO auditoria VALUES ('alta',current_timestamp);  -- Cuando hay una inserción
-   ELSIF TG_OP='UPDATE'	THEN
-     INSERT INTO auditoria VALUES ('modificación',current_timestamp); -- Cuando hay una modificación
-   ELSEIF TG_OP='DELETE' THEN
-     INSERT INTO auditoria VALUES ('borrado',current_timestamp); -- Cuando hay un borrado
-   END IF;	 
-   RETURN NULL;
-  END;
-$fn_auditoria$ LANGUAGE plpgsql;
-
-
-
--- Se crea el trigger que se dispara cuando hay una inserción, modificación o borrado en la tabla sala
-
-CREATE TRIGGER tg_auditoria after INSERT or UPDATE or DELETE
-  ON SALA FOR EACH ROW
-  EXECUTE PROCEDURE fn_auditoria(); 
-
-
